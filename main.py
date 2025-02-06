@@ -493,14 +493,15 @@ class VideoAnalyzer(TkinterDnD.Tk):
             # 获取当前灵敏度值
             sensitivity = self.sensitivity_value.get()
             
-            # 第一步：使用ffmpeg提取关键帧
-            temp_pattern = os.path.join(frames_dir, 'temp_%04d.png').replace('\\', '/')
+            # 第一步：使用ffmpeg提取关键帧，改用jpg格式
+            temp_pattern = os.path.join(frames_dir, 'temp_%04d.jpg').replace('\\', '/')
             
             extract_command = [
                 'ffmpeg',
                 '-i', video_path,
                 '-vf', f"select='gt(scene,{sensitivity})'",
                 '-vsync', 'vfr',
+                '-q:v', '2',  # 添加JPEG质量设置
                 temp_pattern
             ]
 
@@ -520,23 +521,12 @@ class VideoAnalyzer(TkinterDnD.Tk):
                 if not line and process.poll() is not None:
                     break
                 
-                # 检查是否生成了新的图片
-                frame_files = sorted(glob.glob(os.path.join(frames_dir, 'temp_*.png')))
+                # 检查是否生成了新的图片，修改为jpg格式
+                frame_files = sorted(glob.glob(os.path.join(frames_dir, 'temp_*.jpg')))
                 for frame_file in frame_files:
-                    if frame_file not in self.processed_files:  # 使用 processed_files 检查
+                    if frame_file not in self.processed_files:
                         # 获取帧号
-                        frame_num = int(os.path.basename(frame_file).replace('temp_', '').replace('.png', ''))
-                        
-                        # 使用ffprobe获取这一帧的时间戳
-                        timestamp_cmd = [
-                            'ffprobe',
-                            '-v', 'error',
-                            '-select_streams', 'v:0',
-                            '-show_entries', 'frame=pts_time',
-                            '-of', 'csv=p=0',
-                            '-read_intervals', f'%+#1',
-                            video_path
-                        ]
+                        frame_num = int(os.path.basename(frame_file).replace('temp_', '').replace('.jpg', ''))
                         
                         try:
                             # 计算大致时间戳（这是一个估算）
@@ -549,8 +539,8 @@ class VideoAnalyzer(TkinterDnD.Tk):
                             seconds = int(timestamp % 60)
                             milliseconds = int((timestamp % 1) * 1000)
                             
-                            # 创建新的文件名
-                            new_filename = f'frame_{hours:02d}-{minutes:02d}-{seconds:02d}.{milliseconds:03d}.png'
+                            # 创建新的文件名，使用jpg扩展名
+                            new_filename = f'frame_{hours:02d}-{minutes:02d}-{seconds:02d}.{milliseconds:03d}.jpg'
                             new_filepath = os.path.join(frames_dir, new_filename)
                             
                             # 重命名文件
@@ -558,7 +548,7 @@ class VideoAnalyzer(TkinterDnD.Tk):
                             
                             # 添加到预览队列
                             self.preview_queue.put(('add_preview', new_filepath))
-                            self.processed_files.append(new_filepath)  # 添加到已处理文件列表
+                            self.processed_files.append(new_filepath)
                         except Exception as e:
                             print(f"Error processing frame {frame_file}: {e}")
 
@@ -612,7 +602,7 @@ class VideoAnalyzer(TkinterDnD.Tk):
             photo = ImageTk.PhotoImage(img)
 
             # 从文件名中提取时间码
-            time_str = os.path.basename(image_path).replace('frame_', '').replace('.png', '')
+            time_str = os.path.basename(image_path).replace('frame_', '').replace('.jpg', '')
             
             # 创建预览容器
             preview_container = ttk.Frame(self.scrollable_frame)
