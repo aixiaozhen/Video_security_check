@@ -17,6 +17,7 @@ import time
 from zhipuai import ZhipuAI
 from abc import ABC, abstractmethod
 from config_manager import ConfigManager
+from tkinter import filedialog
 
 
 class AIAnalyzer(ABC):
@@ -342,6 +343,44 @@ class VideoAnalyzer(TkinterDnD.Tk):
         style.configure("Risk.TFrame", background="red")
         style.configure("Safe.TFrame", background="green")
 
+        # 在设置区域添加输出目录设置
+        self.output_frame = ttk.LabelFrame(self.settings_frame, text="输出设置")
+        self.output_frame.pack(padx=5, pady=5, fill=tk.X)
+
+        # 使用视频目录的选项
+        self.use_video_dir = tk.BooleanVar(value=self.config_manager.config.get('use_video_dir', True))
+        self.use_video_dir_check = ttk.Checkbutton(
+            self.output_frame,
+            text="使用视频所在目录",
+            variable=self.use_video_dir,
+            command=self._toggle_output_dir
+        )
+        self.use_video_dir_check.pack(padx=5, pady=2, anchor='w')
+
+        # 输出目录选择
+        self.output_dir_frame = ttk.Frame(self.output_frame)
+        self.output_dir_frame.pack(fill=tk.X, padx=5, pady=2)
+        
+        ttk.Label(self.output_dir_frame, text="输出目录:").pack(side=tk.LEFT)
+        
+        self.output_dir_entry = ttk.Entry(self.output_dir_frame)
+        self.output_dir_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        self.browse_button = ttk.Button(
+            self.output_dir_frame,
+            text="浏览...",
+            command=self._browse_output_dir
+        )
+        self.browse_button.pack(side=tk.LEFT)
+
+        # 加载保存的输出目录
+        saved_dir = self.config_manager.config.get('output_dir', '')
+        if saved_dir:
+            self.output_dir_entry.insert(0, saved_dir)
+        
+        # 根据使用视频目录选项设置状态
+        self._toggle_output_dir()
+
     def _load_saved_config(self):
         """加载保存的配置"""
         config = self.config_manager.config
@@ -374,8 +413,10 @@ class VideoAnalyzer(TkinterDnD.Tk):
         config = {
             'enable_ai': self.enable_ai.get(),
             'current_model': self.current_model.get(),
-            'api_key': self.api_key_entry.get().strip(),  # 确保去除空白字符
-            'sensitivity': float(self.sensitivity_scale.get())
+            'api_key': self.api_key_entry.get().strip(),
+            'sensitivity': float(self.sensitivity_scale.get()),
+            'output_dir': self.output_dir_entry.get().strip(),
+            'use_video_dir': self.use_video_dir.get()
         }
         print("Saving config:", config)  # 添加调试输出
         self.config_manager.save_config(config)
@@ -484,16 +525,38 @@ class VideoAnalyzer(TkinterDnD.Tk):
 
     def _process_video_thread(self, video_path):
         try:
-            # 创建输出目录
-            video_dir = os.path.dirname(video_path)
-            frames_dir = os.path.join(video_dir, 'tmp_frames')
+            # 获取视频文件名（不含扩展名）和时间戳
+            video_name = os.path.splitext(os.path.basename(video_path))[0]
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            
+            # 创建输出目录名称（只包含视频名和时间戳）
+            frames_dir_name = f"{video_name}_{timestamp}"
+            # 清理目录名中的非法字符
+            frames_dir_name = re.sub(r'[<>:"/\\|?*]', '_', frames_dir_name)
+            
+            # 根据设置选择基础目录
+            if self.use_video_dir.get():
+                # 使用视频所在目录
+                base_dir = os.path.dirname(os.path.abspath(video_path))
+            else:
+                # 使用自定义目录，如果未设置则默认使用视频所在目录
+                custom_dir = self.output_dir_entry.get().strip()
+                base_dir = custom_dir if custom_dir else os.path.dirname(os.path.abspath(video_path))
+            
+            # 组合完整的输出路径
+            frames_dir = os.path.join(base_dir, frames_dir_name)
+            
+            # 创建目录
             if not os.path.exists(frames_dir):
                 os.makedirs(frames_dir)
+
+            # 更新状态显示（只显示目录名，不显示完整路径）
+            self.preview_queue.put(('update_status', f"正在处理: {frames_dir_name}"))
 
             # 获取当前灵敏度值
             sensitivity = self.sensitivity_value.get()
             
-            # 第一步：使用ffmpeg提取关键帧，改用jpg格式
+            # 使用ffmpeg提取关键帧
             temp_pattern = os.path.join(frames_dir, 'temp_%04d.jpg').replace('\\', '/')
             
             extract_command = [
@@ -569,11 +632,27 @@ class VideoAnalyzer(TkinterDnD.Tk):
                 if action == 'add_preview':
                     self._add_preview_image(data)
                     self.progress_label.config(text=f"已提取 {len(self.processed_files)} 个关键帧")
+                elif action == 'update_status':
+                    self.status_label.config(text=data)
                 elif action == 'complete':
                     self.progress_bar.stop()
                     self.progress_label.config(text=f"完成！共提取 {len(self.processed_files)} 个关键帧")
                     self.status_label.config(text="处理完成")
-                    messagebox.showinfo("完成", f"视频处理完成！\n共提取 {len(self.processed_files)} 个关键帧")
+                    
+                    # 获取输出目录
+                    if self.processed_files:
+                        output_dir = os.path.dirname(self.processed_files[0])
+                        if messagebox.askyesno("完成", 
+                            f"视频处理完成！\n"
+                            f"共提取 {len(self.processed_files)} 个关键帧\n"
+                            f"输出目录：\n{output_dir}\n\n"
+                            f"是否打开输出目录？"
+                        ):
+                            os.startfile(output_dir)  # Windows
+                            # 对于其他操作系统：
+                            # import subprocess
+                            # subprocess.run(['open', output_dir])  # macOS
+                            # subprocess.run(['xdg-open', output_dir])  # Linux
                     return
                 elif action == 'error':
                     self.progress_bar.stop()
@@ -804,6 +883,24 @@ class VideoAnalyzer(TkinterDnD.Tk):
     def _on_mousewheel(self, event):
         # 调整垂直滚动
         self.canvas.yview_scroll(int(-1 * (event.delta / 60)), "units")
+
+    def _toggle_output_dir(self):
+        """切换输出目录设置的启用状态"""
+        state = 'disabled' if self.use_video_dir.get() else 'normal'
+        self.output_dir_entry.config(state=state)
+        self.browse_button.config(state=state)
+        self._save_config()
+
+    def _browse_output_dir(self):
+        """浏览并选择输出目录"""
+        directory = filedialog.askdirectory(
+            title="选择输出目录",
+            initialdir=self.output_dir_entry.get() or os.path.expanduser("~")
+        )
+        if directory:
+            self.output_dir_entry.delete(0, tk.END)
+            self.output_dir_entry.insert(0, directory)
+            self._save_config()
 
 
 if __name__ == '__main__':

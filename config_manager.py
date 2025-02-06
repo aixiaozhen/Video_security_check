@@ -16,7 +16,9 @@ class ConfigManager:
             'enable_ai': False,
             'current_model': '',
             'api_key': '',
-            'sensitivity': 0.3
+            'sensitivity': 0.3,
+            'output_dir': '',
+            'use_video_dir': True
         }
         
         # 加载配置，但不覆盖已存在的值
