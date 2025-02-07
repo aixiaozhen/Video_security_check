@@ -18,135 +18,7 @@ from zhipuai import ZhipuAI
 from abc import ABC, abstractmethod
 from config_manager import ConfigManager
 from tkinter import filedialog
-
-
-class AIAnalyzer(ABC):
-    """AI分析器的抽象基类"""
-    
-    @abstractmethod
-    def analyze_image(self, image_path):
-        """分析图片的抽象方法"""
-        pass
-
-    @abstractmethod
-    def get_name(self):
-        """获取分析器名称"""
-        pass
-
-    @abstractmethod
-    def is_configured(self):
-        """检查是否配置完成"""
-        pass
-
-class ZhipuAnalyzer(AIAnalyzer):
-    """智谱AI分析器"""
-    
-    def __init__(self):
-        self.api_key = ""
-        self.client = None
-        self.max_retries = 3
-        self.retry_delay = 2
-
-    def configure(self, api_key):
-        """配置API密钥"""
-        self.api_key = api_key
-        self.client = ZhipuAI(api_key=api_key)
-        
-    def get_name(self):
-        return "智谱 GLM-4V"
-        
-    def is_configured(self):
-        return bool(self.api_key and self.client)
-
-    def analyze_image(self, image_path):
-        if not self.is_configured():
-            raise ValueError("API key not configured")
-
-        for attempt in range(self.max_retries):
-            try:
-                with open(image_path, 'rb') as image_file:
-                    img_base = base64.b64encode(image_file.read()).decode('utf-8')
-
-                response = self.client.chat.completions.create(
-                    model="glm-4v-plus",
-                    messages=[{
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": img_base}
-                            },
-                            {
-                                "type": "text",
-                                "text": "请以少儿内容专家的身份，分析这张图片是否安全是否适合儿童观看，主要关注：暴力、恐怖、政治、地球、地图等不适内容。请用JSON格式回复：{is_safe: true/false, risk_type: 风险类型, description: 说明}"
-                            }
-                        ]
-                    }]
-                )
-                return response
-
-            except Exception as e:
-                error_str = str(e)
-                if "429" in error_str:
-                    print(f"并发限制错误，等待重试: {e}")
-                    time.sleep(self.retry_delay * (attempt + 1))
-                    continue
-                elif "400" in error_str:
-                    return {
-                        "choices": [{
-                            "message": {
-                                "content": json.dumps({
-                                    "is_safe": False,
-                                    "risk_type": "敏感内容",
-                                    "description": "系统检测到可能的敏感内容"
-                                })
-                            }
-                        }]
-                    }
-                else:
-                    print(f"其他错误 (尝试 {attempt + 1}): {e}")
-                    if attempt < self.max_retries - 1:
-                        time.sleep(self.retry_delay)
-                    else:
-                        raise
-
-        return None
-
-class AIManager:
-    """AI分析器管理类"""
-    
-    def __init__(self):
-        self.analyzers = {
-            "zhipu": ZhipuAnalyzer(),
-            # 在这里添加其他AI分析器
-        }
-        self.current_analyzer = None
-
-    def get_available_analyzers(self):
-        """获取所有可用的分析器"""
-        return [(key, analyzer.get_name()) for key, analyzer in self.analyzers.items()]
-
-    def set_current_analyzer(self, analyzer_key):
-        """设置当前使用的分析器"""
-        if analyzer_key in self.analyzers:
-            self.current_analyzer = self.analyzers[analyzer_key]
-        else:
-            raise ValueError(f"Unknown analyzer: {analyzer_key}")
-
-    def configure_analyzer(self, analyzer_key, api_key):
-        """配置指定的分析器"""
-        if analyzer_key in self.analyzers:
-            self.analyzers[analyzer_key].configure(api_key)
-        else:
-            raise ValueError(f"Unknown analyzer: {analyzer_key}")
-
-    def analyze_image(self, image_path):
-        """使用当前分析器分析图片"""
-        if not self.current_analyzer:
-            raise ValueError("No analyzer selected")
-        if not self.current_analyzer.is_configured():
-            raise ValueError("Current analyzer not configured")
-        return self.current_analyzer.analyze_image(image_path)
+from ai_analyzer import AIManager  # 从 ai_analyzer 导入 AIManager
 
 
 class VideoAnalyzer(TkinterDnD.Tk):
@@ -215,12 +87,19 @@ class VideoAnalyzer(TkinterDnD.Tk):
         self.ai_model_frame.pack(fill=tk.X, padx=5, pady=5)
         ttk.Label(self.ai_model_frame, text="AI模型:").pack(side=tk.LEFT)
         
+        # 获取可用的模型列表
+        model_names = [model[1] for model in self.available_models]
         self.model_combobox = ttk.Combobox(
             self.ai_model_frame,
             textvariable=self.current_model,
-            values=[model[1] for model in self.available_models],
-            state='disabled'
+            values=model_names,
+            state='disabled',
+            exportselection=0,
+            justify='left'
         )
+        self.model_combobox['state'] = 'readonly'
+        if model_names:  # 如果有可用模型，设置默认值
+            self.model_combobox.set(model_names[0])
         self.model_combobox.pack(side=tk.LEFT, padx=5)
         
         # API密钥设置
@@ -399,7 +278,11 @@ class VideoAnalyzer(TkinterDnD.Tk):
                     self.ai_manager.configure_analyzer(model_key, config['api_key'])
                     self.ai_manager.set_current_analyzer(model_key)
             except StopIteration:
-                pass
+                print("Warning: Saved model not found in available models")
+                if self.available_models:  # 如果有可用模型，使用第一个
+                    self.current_model.set(self.available_models[0][1])
+        elif self.available_models:  # 如果没有保存的模型但有可用模型，使用第一个
+            self.current_model.set(self.available_models[0][1])
         
         # 设置灵敏度
         if 'sensitivity' in config:
@@ -481,12 +364,16 @@ class VideoAnalyzer(TkinterDnD.Tk):
                 messagebox.showerror("错误", "请输入API密钥！")
                 return
             
-            # 配置AI分析器并保存配置
-            model_key = next(key for key, name in self.available_models 
-                            if name == self.current_model.get())
-            self.ai_manager.configure_analyzer(model_key, self.api_key_entry.get())
-            self.ai_manager.set_current_analyzer(model_key)
-            self._save_config()
+            try:
+                # 配置AI分析器并保存配置
+                model_key = next(key for key, name in self.available_models 
+                               if name == self.current_model.get())
+                self.ai_manager.configure_analyzer(model_key, self.api_key_entry.get())
+                self.ai_manager.set_current_analyzer(model_key)
+                self._save_config()
+            except StopIteration:
+                messagebox.showerror("错误", "无效的AI模型选择！")
+                return
         
         self.process_video(file_path)
 
@@ -584,7 +471,7 @@ class VideoAnalyzer(TkinterDnD.Tk):
                 if not line and process.poll() is not None:
                     break
                 
-                # 检查是否生成了新的图片，修改为jpg格式
+                # 检查是否生成了新的图片
                 frame_files = sorted(glob.glob(os.path.join(frames_dir, 'temp_*.jpg')))
                 for frame_file in frame_files:
                     if frame_file not in self.processed_files:
@@ -602,8 +489,8 @@ class VideoAnalyzer(TkinterDnD.Tk):
                             seconds = int(timestamp % 60)
                             milliseconds = int((timestamp % 1) * 1000)
                             
-                            # 创建新的文件名，使用jpg扩展名
-                            new_filename = f'frame_{hours:02d}-{minutes:02d}-{seconds:02d}.{milliseconds:03d}.jpg'
+                            # 创建新的文件名，去掉 "frame_" 前缀
+                            new_filename = f'{hours:02d}-{minutes:02d}-{seconds:02d}.{milliseconds:03d}.jpg'
                             new_filepath = os.path.join(frames_dir, new_filename)
                             
                             # 重命名文件
@@ -636,28 +523,20 @@ class VideoAnalyzer(TkinterDnD.Tk):
                     self.status_label.config(text=data)
                 elif action == 'complete':
                     self.progress_bar.stop()
-                    self.progress_label.config(text=f"完成！共提取 {len(self.processed_files)} 个关键帧")
-                    self.status_label.config(text="处理完成")
                     
                     # 获取输出目录
                     if self.processed_files:
                         output_dir = os.path.dirname(self.processed_files[0])
-                        if messagebox.askyesno("完成", 
-                            f"视频处理完成！\n"
-                            f"共提取 {len(self.processed_files)} 个关键帧\n"
-                            f"输出目录：\n{output_dir}\n\n"
-                            f"是否打开输出目录？"
-                        ):
-                            os.startfile(output_dir)  # Windows
-                            # 对于其他操作系统：
-                            # import subprocess
-                            # subprocess.run(['open', output_dir])  # macOS
-                            # subprocess.run(['xdg-open', output_dir])  # Linux
+                        # 更新状态栏显示完整信息
+                        self.status_label.config(
+                            text=f"处理完成 - 共提取 {len(self.processed_files)} 个关键帧 - 保存位置：{output_dir}"
+                        )
+                        self.progress_label.config(text="完成！")
                     return
                 elif action == 'error':
                     self.progress_bar.stop()
                     self.progress_label.config(text="处理失败")
-                    self.status_label.config(text="处理失败")
+                    self.status_label.config(text=f"处理失败 - {data}")
                     messagebox.showerror("错误", f"视频处理失败！\n错误信息：{data}")
                     return
 
@@ -680,8 +559,8 @@ class VideoAnalyzer(TkinterDnD.Tk):
             img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(img)
 
-            # 从文件名中提取时间码
-            time_str = os.path.basename(image_path).replace('frame_', '').replace('.jpg', '')
+            # 从文件名中提取时间码（去掉了 frame_ 前缀的处理）
+            time_str = os.path.basename(image_path).replace('.jpg', '')
             
             # 创建预览容器
             preview_container = ttk.Frame(self.scrollable_frame)
@@ -741,93 +620,38 @@ class VideoAnalyzer(TkinterDnD.Tk):
         try:
             # 使用 AI 管理器进行分析
             response = self.ai_manager.analyze_image(image_path)
+            result = self.ai_manager.current_analyzer.parse_response(response)
             
-            if response and (hasattr(response, 'choices') or isinstance(response, dict)):
-                try:
-                    # 获取原始内容
-                    if isinstance(response, dict):
-                        content = response['choices'][0]['message']['content']
-                    else:
-                        content = response.choices[0].message.content
-                    
-                    print(f"Raw API response for {image_path}:", content)
-                    
-                    # 清理 Markdown 代码块标记
-                    content = re.sub(r'```json\s*', '', content)
-                    content = re.sub(r'```\s*$', '', content)
-                    content = content.strip()
-                    
-                    try:
-                        # 直接解析清理后的 JSON
-                        content_data = json.loads(content)
-                    except json.JSONDecodeError:
-                        # 如果解析失败，尝试进一步清理和修复
-                        try:
-                            json_match = re.search(r'\{.*?\}', content, re.DOTALL)
-                            if json_match:
-                                json_str = json_match.group()
-                                json_str = re.sub(r'(?m)^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'"\1":', json_str)
-                                json_str = json_str.replace("'", '"')
-                                content_data = json.loads(json_str)
-                            else:
-                                # 如果没有找到 JSON，从文本内容推断结果
-                                content_lower = content.lower()
-                                is_safe = all(word not in content_lower for word in [
-                                    "不安全", "风险", "危险", "暴力", "恐怖", "血腥", 
-                                    "敏感", "不适", "违规", "违法"
-                                ])
-                                risk_type = "未知" if not is_safe else ""
-                                description = content.strip()
-                                content_data = {
-                                    "is_safe": is_safe,
-                                    "risk_type": risk_type,
-                                    "description": description
-                                }
-                        except Exception as e:
-                            print(f"Error fixing JSON for {image_path}: {e}")
-                            raise
-
-                    # 提取和标准化结果
-                    is_safe = content_data.get('is_safe', True)
-                    if isinstance(is_safe, str):
-                        is_safe = is_safe.lower() in ['true', '1', 'yes', '安全']
-                    
-                    risk_type = content_data.get('risk_type', '')
-                    if not risk_type and not is_safe:
-                        risk_type = "未知风险"
-                    elif risk_type.lower() in ['无', 'none', '']:
-                        risk_type = ""
-                    
-                    description = content_data.get('description', '')
-                    if not description:
-                        description = "无详细说明" if is_safe else "检测到潜在风险"
-
-                    # 更新界面
-                    self.after(0, lambda: self._update_analysis_result(
-                        container, label, is_safe, risk_type, description))
-                    
-                    # 存储结果
-                    self.analysis_results[image_path] = {
-                        'is_safe': is_safe,
-                        'risk_type': risk_type,
-                        'description': description
-                    }
-                except Exception as e:
-                    print(f"Error parsing result for {image_path}: {e}")
-                    print(f"Raw content: {content}")
-                    self.after(0, lambda: label.config(
-                        text="解析失败", 
-                        foreground="orange"))
-            else:
-                self.after(0, lambda: label.config(
-                    text="分析失败", 
-                    foreground="red"))
+            # 更新界面
+            self.after(0, lambda: self._update_analysis_result(
+                container, label, 
+                result['is_safe'], 
+                result['risk_type'], 
+                result['description']
+            ))
+            
+            # 存储结果
+            self.analysis_results[image_path] = result
 
         except Exception as e:
+            error_msg = str(e)
             print(f"Error in analysis thread for {image_path}: {e}")
-            self.after(0, lambda: label.config(
-                text="分析出错", 
-                foreground="red"))
+            
+            # 处理欠费错误
+            if "账户已欠费" in error_msg:
+                self.after(0, lambda: [
+                    label.config(text="AI服务已欠费", foreground="red"),
+                    messagebox.showerror("错误", "AI服务账户已欠费，请充值后重试"),
+                    # 禁用 AI 分析功能
+                    self.enable_ai.set(False),
+                    self._toggle_ai_settings()
+                ])
+            else:
+                # 其他错误的处理
+                self.after(0, lambda: label.config(
+                    text="分析出错", 
+                    foreground="red"
+                ))
 
     def _update_analysis_result(self, container, label, is_safe, risk_type, description):
         try:

@@ -40,7 +40,7 @@ class ZhipuAnalyzer(AIAnalyzer):
         self.client = ZhipuAI(api_key=api_key)
 
     def get_name(self):
-        return "智谱 GLM-4V"
+        return "智谱 GLM-4V-Flash"
 
     def is_configured(self):
         return bool(self.api_key and self.client)
@@ -74,7 +74,12 @@ class ZhipuAnalyzer(AIAnalyzer):
 
             except Exception as e:
                 error_str = str(e)
-                if "429" in error_str:
+                print(f"API Error: {error_str}")  # 添加调试输出
+                
+                # 检查欠费错误
+                if '"code":"1113"' in error_str or "账户已欠费" in error_str:
+                    raise Exception("AI服务账户已欠费，请充值后重试") from e
+                elif "429" in error_str:
                     print(f"并发限制错误，等待重试: {e}")
                     time.sleep(self.retry_delay * (attempt + 1))
                     continue
@@ -98,6 +103,76 @@ class ZhipuAnalyzer(AIAnalyzer):
                         raise
 
         return None
+
+    def parse_response(self, response):
+        """解析API响应"""
+        if not response or not (hasattr(response, 'choices') or isinstance(response, dict)):
+            raise ValueError("Invalid response format")
+
+        try:
+            # 获取原始内容
+            if isinstance(response, dict):
+                content = response['choices'][0]['message']['content']
+            else:
+                content = response.choices[0].message.content
+            
+            print(f"Raw API response:", content)
+            
+            # 清理 Markdown 代码块标记
+            content = re.sub(r'```json\s*', '', content)
+            content = re.sub(r'```\s*$', '', content)
+            content = content.strip()
+            
+            try:
+                # 直接解析清理后的 JSON
+                content_data = json.loads(content)
+            except json.JSONDecodeError:
+                # 如果解析失败，尝试进一步清理和修复
+                try:
+                    json_match = re.search(r'\{.*?\}', content, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group()
+                        json_str = re.sub(r'(?m)^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'"\1":', json_str)
+                        json_str = json_str.replace("'", '"')
+                        content_data = json.loads(json_str)
+                    else:
+                        # 如果没有找到 JSON，从文本内容推断结果
+                        content_lower = content.lower()
+                        is_safe = all(word not in content_lower for word in [
+                            "不安全", "风险", "危险", "暴力", "恐怖", "血腥", 
+                            "敏感", "不适", "违规", "违法"
+                        ])
+                        content_data = {
+                            "is_safe": is_safe,
+                            "risk_type": "未知" if not is_safe else "",
+                            "description": content.strip()
+                        }
+                except Exception as e:
+                    raise ValueError(f"Error fixing JSON: {e}")
+
+            # 提取和标准化结果
+            is_safe = content_data.get('is_safe', True)
+            if isinstance(is_safe, str):
+                is_safe = is_safe.lower() in ['true', '1', 'yes', '安全']
+            
+            risk_type = content_data.get('risk_type', '')
+            if not risk_type and not is_safe:
+                risk_type = "未知风险"
+            elif risk_type.lower() in ['无', 'none', '']:
+                risk_type = ""
+            
+            description = content_data.get('description', '')
+            if not description:
+                description = "无详细说明" if is_safe else "检测到潜在风险"
+
+            return {
+                'is_safe': is_safe,
+                'risk_type': risk_type,
+                'description': description
+            }
+            
+        except Exception as e:
+            raise ValueError(f"Error parsing response: {e}")
 
 
 class AIManager:
