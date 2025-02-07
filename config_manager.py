@@ -16,7 +16,7 @@ class ConfigManager:
             'enable_ai': False,
             'current_model': '',
             'api_key': '',
-            'sensitivity': 0.3,
+            'sensitivity': 0.2,
             'output_dir': '',
             'use_video_dir': True
         }

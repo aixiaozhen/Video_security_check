@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from config_manager import ConfigManager
 from tkinter import filedialog
 from ai_analyzer import AIManager  # 从 ai_analyzer 导入 AIManager
+import shutil
 
 
 class VideoAnalyzer(TkinterDnD.Tk):
@@ -27,8 +28,19 @@ class VideoAnalyzer(TkinterDnD.Tk):
 
         # 设置窗口标题和尺寸
         self.title("视频安全检查工具")
-        self.geometry("1024x768")
+        self.geometry("1024x800")
         self.resizable(False, False)
+
+        # 创建和配置样式
+        style = ttk.Style()
+        # 无边框样式
+        style.configure('Borderless.TFrame', borderwidth=0)
+        style.configure('Borderless.TLabelframe', borderwidth=0)
+        style.configure('Borderless.TLabelframe.Label', borderwidth=0)
+        
+        # 只保留外边框的样式
+        style.configure('OuterBorder.TLabelframe', borderwidth=1, relief='solid')
+        style.configure('OuterBorder.TLabelframe.Label', borderwidth=0)
 
         # 初始化配置管理器
         self.config_manager = ConfigManager()
@@ -39,6 +51,8 @@ class VideoAnalyzer(TkinterDnD.Tk):
         self.concurrent_limit = 2
         self.request_semaphore = threading.Semaphore(self.concurrent_limit)
         self.analysis_results = {}
+        self.pending_analysis = 0  # 添加待分析计数器
+        self.auto_export_report = True  # 添加自动导出标志
 
         # 初始化 AI 管理器
         self.ai_manager = AIManager()
@@ -47,7 +61,7 @@ class VideoAnalyzer(TkinterDnD.Tk):
         # 创建 UI 变量
         self.enable_ai = tk.BooleanVar(value=self.config_manager.config.get('enable_ai', False))
         self.current_model = tk.StringVar(value=self.config_manager.config.get('current_model', ''))
-        self.sensitivity_value = tk.StringVar(value=str(self.config_manager.config.get('sensitivity', 0.3)))
+        self.sensitivity_value = tk.StringVar(value=str(self.config_manager.config.get('sensitivity', 0.2)))
 
         # 创建所有 UI 控件
         self._create_ui()
@@ -56,9 +70,16 @@ class VideoAnalyzer(TkinterDnD.Tk):
         self._load_saved_config()
 
     def _create_ui(self):
-        """创建所有UI控件"""
+        # 创建主容器来组织所有内容 - 使用无边框样式
+        main_container = ttk.Frame(self, style='Borderless.TFrame')
+        main_container.pack(fill=tk.BOTH, expand=True)
+
+        # 上部内容区域 - 使用无边框样式
+        content_frame = ttk.Frame(main_container, style='Borderless.TFrame')
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 0))
+
         # 修改拖拽区域显示
-        self.drop_frame = ttk.LabelFrame(self, text="将视频文件拖拽到这里")
+        self.drop_frame = ttk.LabelFrame(content_frame, text="将视频文件拖拽到这里", style='Borderless.TLabelframe')
         self.drop_frame.pack(padx=10, pady=10, fill=tk.X)
         
         # 添加视频信息标签
@@ -70,7 +91,7 @@ class VideoAnalyzer(TkinterDnD.Tk):
         self.drop_frame.dnd_bind('<<Drop>>', self.handle_drop)
 
         # 创建AI设置区域
-        self.ai_settings_frame = ttk.LabelFrame(self, text="AI 分析设置")
+        self.ai_settings_frame = ttk.LabelFrame(content_frame, text="AI 分析设置", style='Borderless.TLabelframe')
         self.ai_settings_frame.pack(padx=10, pady=5, fill=tk.X)
         
         # 启用AI分析的复选框
@@ -93,11 +114,10 @@ class VideoAnalyzer(TkinterDnD.Tk):
             self.ai_model_frame,
             textvariable=self.current_model,
             values=model_names,
-            state='disabled',
+            state='readonly',  # 设置为只读状态
             exportselection=0,
             justify='left'
         )
-        self.model_combobox['state'] = 'readonly'
         if model_names:  # 如果有可用模型，设置默认值
             self.model_combobox.set(model_names[0])
         self.model_combobox.pack(side=tk.LEFT, padx=5)
@@ -123,16 +143,29 @@ class VideoAnalyzer(TkinterDnD.Tk):
         self.api_key_entry.bind('<KeyRelease>', lambda e: self._save_config())
         self.api_key_entry.bind('<FocusOut>', lambda e: self._save_config())
 
+        # 创建按钮容器框架
+        button_frame = ttk.Frame(self.ai_settings_frame)
+        button_frame.pack(padx=5, pady=5, fill=tk.X)
+
         # 添加配置文件目录按钮
         self.config_button = ttk.Button(
-            self.ai_settings_frame,
+            button_frame,  # 改为放在button_frame中
             text="打开配置目录",
             command=self._open_config_dir
         )
-        self.config_button.pack(padx=5, pady=5)
+        self.config_button.pack(side=tk.LEFT, padx=5)  # 使用side=tk.LEFT
+
+        # 添加风险报告按钮
+        self.report_button = ttk.Button(
+            button_frame,  # 改为放在button_frame中
+            text="查看风险报告",
+            command=self._show_risk_report,
+            state='disabled'
+        )
+        self.report_button.pack(side=tk.LEFT, padx=5)  # 使用side=tk.LEFT
 
         # 创建设置区域
-        self.settings_frame = ttk.LabelFrame(self, text="设置")
+        self.settings_frame = ttk.LabelFrame(content_frame, text="设置", style='Borderless.TLabelframe')
         self.settings_frame.pack(padx=10, pady=5, fill=tk.X)
 
         # 创建场景检测灵敏度滑动条
@@ -142,7 +175,7 @@ class VideoAnalyzer(TkinterDnD.Tk):
         ttk.Label(self.sensitivity_frame, text="场景检测灵敏度:").pack(side=tk.LEFT, padx=5)
         
         # 先创建标签
-        self.sensitivity_label = ttk.Label(self.sensitivity_frame, text="0.3")
+        self.sensitivity_label = ttk.Label(self.sensitivity_frame, text="0.2")
         self.sensitivity_label.pack(side=tk.RIGHT, padx=5)
         
         # 然后创建滑动条
@@ -154,22 +187,34 @@ class VideoAnalyzer(TkinterDnD.Tk):
             command=self.update_sensitivity_label
         )
         self.sensitivity_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.sensitivity_scale.set(0.3)  # 设置默认值
+        self.sensitivity_scale.set(0.2)
 
-        # 修改预览区域的布局
-        self.preview_frame = ttk.LabelFrame(self, text="关键帧预览")
+        # 修改预览区域的布局 - 使用新的带边框样式
+        self.preview_frame = ttk.LabelFrame(
+            content_frame, 
+            text="关键帧预览", 
+            style='OuterBorder.TLabelframe'
+        )
         self.preview_frame.pack(padx=10, pady=5, fill=tk.BOTH, expand=True)
 
-        # 创建画布和滚动条的容器
-        self.canvas_container = ttk.Frame(self.preview_frame)
-        self.canvas_container.pack(fill=tk.BOTH, expand=True)
+        # 创建画布和滚动条的容器 - 添加样式
+        self.canvas_container = ttk.Frame(self.preview_frame, style='OuterBorder.TFrame')
+        self.canvas_container.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)  # 添加内边距
         
-        # 创建画布
-        self.canvas = tk.Canvas(self.canvas_container)
+        # 创建画布 - 移除默认边框
+        self.canvas = tk.Canvas(
+            self.canvas_container,
+            highlightthickness=0,  # 移除画布的高亮边框
+            bd=0  # 移除画布的边框
+        )
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # 创建垂直滚动条
-        self.v_scrollbar = ttk.Scrollbar(self.canvas_container, orient="vertical", command=self.canvas.yview)
+        self.v_scrollbar = ttk.Scrollbar(
+            self.canvas_container, 
+            orient="vertical", 
+            command=self.canvas.yview
+        )
         self.v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # 配置画布
@@ -193,19 +238,58 @@ class VideoAnalyzer(TkinterDnD.Tk):
         self.canvas.bind('<Configure>', self.on_frame_configure)
         self.scrollable_frame.bind('<Configure>', self.on_frame_configure)
 
-        # 添加状态标签
-        self.status_label = ttk.Label(self, text="就绪")
-        self.status_label.pack(padx=10, pady=5)
+        # 底部状态栏区域
+        status_frame = ttk.Frame(main_container)
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # 状态栏内部框架（用于固定高度）
+        inner_status_frame = ttk.Frame(status_frame, height=30)
+        inner_status_frame.pack(fill=tk.X, padx=10, pady=5)
+        inner_status_frame.pack_propagate(False)  # 防止框架被内容压缩
 
-        # 添加进度条
-        self.progress_frame = ttk.Frame(self)
-        self.progress_frame.pack(padx=10, pady=5, fill=tk.X)
+        # 修改状态标签布局和显示方式
+        self.status_frame = ttk.Frame(inner_status_frame)  # 创建一个新的框架来容纳状态标签和链接
+        self.status_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        self.progress_label = ttk.Label(self.progress_frame, text="")
-        self.progress_label.pack(side=tk.LEFT, padx=5)
+        self.status_label = ttk.Label(
+            self.status_frame, 
+            text="就绪",
+            wraplength=0,  # 移除自动换行
+            anchor='w',
+            width=50  # 设置固定宽度
+        )
+        self.status_label.pack(side=tk.LEFT)
         
-        self.progress_bar = ttk.Progressbar(self.progress_frame, mode='indeterminate')
-        self.progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        # 添加打开链接标签（初始隐藏）
+        self.open_link = ttk.Label(
+            self.status_frame,
+            text="打开",
+            foreground="blue",
+            cursor="hand2"  # 鼠标悬停时显示手型光标
+        )
+        # 初始不显示链接
+        # self.open_link.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # 绑定点击事件
+        self.open_link.bind("<Button-1>", self._open_output_folder)
+
+        # 进度条区域
+        self.progress_frame = ttk.Frame(inner_status_frame)
+        self.progress_frame.pack(side=tk.RIGHT)
+
+        self.progress_label = ttk.Label(
+            self.progress_frame, 
+            text="",
+            width=20
+        )
+        self.progress_label.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.progress_bar = ttk.Progressbar(
+            self.progress_frame, 
+            mode='indeterminate',
+            length=200
+        )
+        self.progress_bar.pack(side=tk.LEFT)
 
         # 创建队列用于线程间通信
         self.preview_queue = queue.Queue()
@@ -223,7 +307,7 @@ class VideoAnalyzer(TkinterDnD.Tk):
         style.configure("Safe.TFrame", background="green")
 
         # 在设置区域添加输出目录设置
-        self.output_frame = ttk.LabelFrame(self.settings_frame, text="输出设置")
+        self.output_frame = ttk.LabelFrame(self.settings_frame, text="输出设置", style='Borderless.TLabelframe')
         self.output_frame.pack(padx=5, pady=5, fill=tk.X)
 
         # 使用视频目录的选项
@@ -306,9 +390,11 @@ class VideoAnalyzer(TkinterDnD.Tk):
 
     def _toggle_ai_settings(self):
         """切换AI设置的启用状态"""
-        state = 'normal' if self.enable_ai.get() else 'disabled'
-        self.model_combobox.config(state=state)
-        self.api_key_entry.config(state=state)
+        state = 'readonly' if self.enable_ai.get() else 'disabled'  # 修改这里，对combobox使用readonly
+        combobox_state = 'readonly' if self.enable_ai.get() else 'disabled'  # 为combobox单独设置状态
+        
+        self.model_combobox.config(state=combobox_state)  # combobox使用单独的状态
+        self.api_key_entry.config(state=state)  # entry使用普通状态
         
         # 如果禁用了 AI，清除当前分析器
         if not self.enable_ai.get():
@@ -387,13 +473,19 @@ class VideoAnalyzer(TkinterDnD.Tk):
         self.status_label.config(text="正在处理视频，请稍候...")
         self.progress_label.config(text="准备处理...")
         self.progress_bar.start(10)  # 启动进度条动画
-        self.update()
-
-        # 清理预览区域
+        
+        # 隐藏打开链接
+        self.open_link.pack_forget()
+        
+        # 清理预览区域和分析结果
         for _, container in self.preview_images:
             container.destroy()
         self.preview_images.clear()
         self.processed_files.clear()
+        self.analysis_results.clear()  # 清除旧的分析结果
+        
+        # 禁用风险报告按钮
+        self.report_button.config(state='disabled')
 
         # 重置行列计数
         self.current_row = 0
@@ -532,6 +624,15 @@ class VideoAnalyzer(TkinterDnD.Tk):
                             text=f"处理完成 - 共提取 {len(self.processed_files)} 个关键帧 - 保存位置：{output_dir}"
                         )
                         self.progress_label.config(text="完成！")
+                        
+                        # 如果启用了AI分析且有风险项，启用风险报告按钮
+                        if self.enable_ai.get() and any(
+                            not result.get('is_safe', True) 
+                            for result in self.analysis_results.values()
+                        ):
+                            self.report_button.config(state='normal')
+                        else:
+                            self.report_button.config(state='disabled')
                     return
                 elif action == 'error':
                     self.progress_bar.stop()
@@ -586,6 +687,7 @@ class VideoAnalyzer(TkinterDnD.Tk):
                 self.ai_manager.current_analyzer and 
                 self.ai_manager.current_analyzer.is_configured()):
                 analysis_label.config(text="正在分析...")
+                self.pending_analysis += 1  # 增加待分析计数
                 analysis_thread = threading.Thread(
                     target=self._analyze_image_thread,
                     args=(image_path, preview_container, analysis_label),
@@ -632,6 +734,21 @@ class VideoAnalyzer(TkinterDnD.Tk):
             
             # 存储结果
             self.analysis_results[image_path] = result
+            
+            # 更新待分析计数并检查是否所有分析都完成
+            self.pending_analysis -= 1
+            if self.pending_analysis == 0:
+                # 如果有风险项
+                has_risks = any(not result.get('is_safe', True) 
+                              for result in self.analysis_results.values())
+                
+                if has_risks:
+                    self.after(0, lambda: [
+                        self.report_button.config(state='normal'),
+                        self._auto_export_report() if self.auto_export_report else None
+                    ])
+                else:
+                    self.after(0, lambda: self.report_button.config(state='disabled'))
 
         except Exception as e:
             error_msg = str(e)
@@ -652,6 +769,7 @@ class VideoAnalyzer(TkinterDnD.Tk):
                     text="分析出错", 
                     foreground="red"
                 ))
+            self.pending_analysis -= 1  # 确保在出错时也减少计数
 
     def _update_analysis_result(self, container, label, is_safe, risk_type, description):
         try:
@@ -725,6 +843,336 @@ class VideoAnalyzer(TkinterDnD.Tk):
             self.output_dir_entry.delete(0, tk.END)
             self.output_dir_entry.insert(0, directory)
             self._save_config()
+
+    def _show_risk_report(self):
+        """显示风险报告窗口"""
+        # 创建报告窗口
+        report_window = tk.Toplevel(self)
+        report_window.title("风险分析报告")
+        report_window.geometry("800x600")
+        report_window.resizable(False, False)  # 禁止调整窗口大小
+        
+        # 创建报告内容
+        report_frame = ttk.Frame(report_window)
+        report_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # 添加标题
+        title_label = ttk.Label(
+            report_frame, 
+            text="风险分析报告", 
+            font=('Arial', 16, 'bold')
+        )
+        title_label.pack(pady=10)
+        
+        # 创建左右分栏的容器
+        content_frame = ttk.Frame(report_frame)
+        content_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        
+        # 左侧列表区域
+        list_frame = ttk.Frame(content_frame)
+        list_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        
+        # 创建风险列表（使用Treeview实现表格效果）
+        columns = ('时间点', '风险类型', '详细说明')
+        tree = ttk.Treeview(list_frame, columns=columns, show='headings')
+        
+        # 设置列标题和宽度
+        tree.heading('时间点', text='时间点')
+        tree.heading('风险类型', text='风险类型')
+        tree.heading('详细说明', text='详细说明')
+        
+        tree.column('时间点', width=100)
+        tree.column('风险类型', width=100)
+        tree.column('详细说明', width=200)
+        
+        # 添加滚动条
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        
+        # 放置树形视图和滚动条
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 右侧预览区域
+        preview_frame = ttk.LabelFrame(content_frame, text="图片预览")
+        preview_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # 预览内容容器
+        preview_content = ttk.Frame(preview_frame)
+        preview_content.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # 用于显示选中图片的标签
+        preview_label = ttk.Label(preview_content)
+        preview_label.pack(pady=5)
+        
+        # 修改风险详情标签的显示方式
+        detail_label = ttk.Label(
+            preview_content, 
+            wraplength=300,  # 调整文字换行宽度
+            justify='left',  # 文字左对齐
+            anchor='w'  # 整体左对齐
+        )
+        detail_label.pack(fill=tk.X, pady=5)
+        
+        # 添加导出按钮和状态标签的容器
+        button_frame = ttk.Frame(report_frame)
+        button_frame.pack(fill=tk.X, pady=10)
+        
+        # 只在报告未导出时显示导出按钮
+        if not hasattr(self, 'current_output_dir'):
+            # 添加导出按钮
+            ttk.Button(
+                button_frame,
+                text="导出报告",
+                command=lambda: self._export_risk_report(status_label)
+            ).pack(side=tk.LEFT, padx=5)
+        
+        # 添加状态标签
+        status_label = ttk.Label(button_frame, text="")
+        status_label.pack(side=tk.LEFT, padx=5)
+        
+        # 填充风险数据
+        risk_items = []
+        for image_path, result in self.analysis_results.items():
+            if not result.get('is_safe', True):
+                # 从文件名提取时间点
+                time_str = os.path.basename(image_path).replace('.jpg', '')
+                risk_items.append({
+                    'time': time_str,
+                    'path': image_path,
+                    'risk_type': result.get('risk_type', '未知风险'),
+                    'description': result.get('description', '无详细说明')
+                })
+        
+        # 按时间排序
+        risk_items.sort(key=lambda x: x['time'])
+        
+        # 添加到树形视图
+        for item in risk_items:
+            tree.insert('', tk.END, values=(
+                item['time'],
+                item['risk_type'],
+                item['description']
+            ), tags=(item['path'],))
+        
+        # 修改选择事件处理
+        def on_select(event):
+            selected = tree.selection()
+            if selected:
+                item = tree.item(selected[0])
+                path = tree.item(selected[0])['tags'][0]
+                
+                # 显示图片
+                img = Image.open(path)
+                # 调整图片大小
+                img.thumbnail((400, 300))
+                photo = ImageTk.PhotoImage(img)
+                preview_label.configure(image=photo)
+                preview_label.image = photo  # 保持引用
+                
+                # 显示详细信息
+                result = self.analysis_results[path]
+                detail_text = f"风险类型：{result['risk_type']}\n\n详细说明：{result['description']}"
+                detail_label.configure(text=detail_text)
+                
+                # 确保标签完全展示
+                preview_frame.update_idletasks()
+        
+        tree.bind('<<TreeviewSelect>>', on_select)
+
+    def _export_risk_report(self, status_label):
+        """导出风险报告到截图目录"""
+        try:
+            # 获取第一个处理过的文件所在目录作为基准目录
+            if not self.processed_files:
+                status_label.config(text="错误：没有可用的图片数据", foreground="red")
+                return
+            
+            base_dir = os.path.dirname(self.processed_files[0])
+            
+            # 使用固定的报告文件名
+            file_path = os.path.join(base_dir, "安全分析报告.html")
+            report_dir = os.path.join(base_dir, "report_files")
+            
+            # 创建报告目录（如果已存在则先删除）
+            if os.path.exists(report_dir):
+                shutil.rmtree(report_dir)
+            os.makedirs(report_dir)
+            
+            # 复制风险图片到报告目录
+            risk_items = []
+            for image_path, result in self.analysis_results.items():
+                if not result.get('is_safe', True):
+                    # 复制图片
+                    new_image_path = os.path.join(report_dir, os.path.basename(image_path))
+                    shutil.copy2(image_path, new_image_path)
+                    
+                    risk_items.append({
+                        'time': os.path.basename(image_path).replace('.jpg', ''),
+                        'image': os.path.basename(image_path),
+                        'risk_type': result.get('risk_type', '未知风险'),
+                        'description': result.get('description', '无详细说明')
+                    })
+            
+            # 生成HTML报告
+            html_content = f"""
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <style>
+                    body {{ font-family:Arial,sans-serif;margin:20px; }}
+                    h1 {{ text-align:center; color:#333; }}
+                    p {{ text-align:center; color:#666; }}
+                    .risk-list {{ display:flex; flex-wrap:wrap; justify-content:flex-start; }}
+                    .risk-item {{ width:calc(16.666% - 20px);margin-bottom:30px;border:1px solid #ccc;border-radius:5px;padding:10px;box-sizing:border-box;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin-right:20px; }}
+                    .risk-item:nth-child(6n) {{ margin-right:0; }}
+                    .risk-image {{ max-width:100%; height:auto; display:block; margin:0 auto; }}
+                    .risk-info {{ margin-top: 10px; }}
+                    .risk-type {{ color: red; font-weight: bold; }}
+                </style>
+            </head>
+            <body>
+                <h1>视频安全分析风险报告</h1>
+                <p>生成时间：{time.strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <div class="risk-list">
+            """
+            
+            for item in sorted(risk_items, key=lambda x: x['time']):
+                html_content += f"""
+                    <div class="risk-item">
+                        <h3>时间点：{item['time']}</h3>
+                        <img class="risk-image" src="{os.path.basename(report_dir)}/{item['image']}">
+                        <div class="risk-info">
+                            <p class="risk-type">风险类型：{item['risk_type']}</p>
+                            <p>详细说明：{item['description']}</p>
+                        </div>
+                    </div>
+                """
+            
+            html_content += """
+                </div>
+            </body>
+            </html>
+            """
+            
+            # 保存HTML文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            # 只更新状态，不自动打开报告
+            status_label.config(
+                text=f"导出成功：{os.path.basename(file_path)}", 
+                foreground="green"
+            )
+            
+        except Exception as e:
+            status_label.config(
+                text=f"导出失败：{str(e)}", 
+                foreground="red"
+            )
+
+    def _auto_export_report(self):
+        """自动导出风险报告"""
+        try:
+            # 获取第一个处理过的文件所在目录作为基准目录
+            if not self.processed_files:
+                print("错误：没有可用的图片数据")
+                return
+            
+            base_dir = os.path.dirname(self.processed_files[0])
+            
+            # 使用固定的报告文件名
+            file_path = os.path.join(base_dir, "安全分析报告.html")
+            report_dir = os.path.join(base_dir, "report_files")
+            
+            # 创建报告目录（如果已存在则先删除）
+            if os.path.exists(report_dir):
+                shutil.rmtree(report_dir)
+            os.makedirs(report_dir)
+            
+            # 复制风险图片到报告目录
+            risk_items = []
+            for image_path, result in self.analysis_results.items():
+                if not result.get('is_safe', True):
+                    # 复制图片
+                    new_image_path = os.path.join(report_dir, os.path.basename(image_path))
+                    shutil.copy2(image_path, new_image_path)
+                    
+                    risk_items.append({
+                        'time': os.path.basename(image_path).replace('.jpg', ''),
+                        'image': os.path.basename(image_path),
+                        'risk_type': result.get('risk_type', '未知风险'),
+                        'description': result.get('description', '无详细说明')
+                    })
+            
+            # 生成HTML报告
+            html_content = f"""
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <style>
+                    body {{ font-family:Arial,sans-serif;margin:20px; }}
+                    h1 {{ text-align:center; color:#333; }}
+                    p {{ text-align:center; color:#666; }}
+                    .risk-list {{ display:flex; flex-wrap:wrap; justify-content:flex-start; }}
+                    .risk-item {{ width:calc(16.666% - 20px);margin-bottom:30px;border:1px solid #ccc;border-radius:5px;padding:10px;box-sizing:border-box;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin-right:20px; }}
+                    .risk-item:nth-child(6n) {{ margin-right:0; }}
+                    .risk-image {{ max-width:100%; height:auto; display:block; margin:0 auto; }}
+                    .risk-info {{ margin-top: 10px; }}
+                    .risk-type {{ color: red; font-weight: bold; }}
+                </style>
+            </head>
+            <body>
+                <h1>视频安全分析风险报告</h1>
+                <p>生成时间：{time.strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <div class="risk-list">
+            """
+            
+            for item in sorted(risk_items, key=lambda x: x['time']):
+                html_content += f"""
+                    <div class="risk-item">
+                        <h3>时间点：{item['time']}</h3>
+                        <img class="risk-image" src="{os.path.basename(report_dir)}/{item['image']}">
+                        <div class="risk-info">
+                            <p class="risk-type">风险类型：{item['risk_type']}</p>
+                            <p>详细说明：{item['description']}</p>
+                        </div>
+                    </div>
+                """
+            
+            html_content += """
+                </div>
+            </body>
+            </html>
+            """
+            
+            # 保存HTML文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            # 更新状态栏显示并显示打开链接
+            self.status_label.config(text=f"风险报告已自动导出：{os.path.basename(file_path)}")
+            
+            # 保存当前输出目录路径
+            self.current_output_dir = base_dir
+            
+            # 显示打开链接
+            self.open_link.pack(side=tk.LEFT, padx=(5, 0))
+            
+        except Exception as e:
+            print(f"自动导出报告失败：{str(e)}")
+            self.status_label.config(text=f"自动导出报告失败：{str(e)}")
+            # 发生错误时隐藏打开链接
+            self.open_link.pack_forget()
+
+    def _open_output_folder(self, event=None):
+        """打开输出文件夹"""
+        if hasattr(self, 'current_output_dir') and os.path.exists(self.current_output_dir):
+            os.startfile(self.current_output_dir)  # Windows
+            # 对于其他操作系统：
+            # import subprocess
+            # subprocess.run(['open', self.current_output_dir])  # macOS
+            # subprocess.run(['xdg-open', self.current_output_dir])  # Linux
 
 
 if __name__ == '__main__':
