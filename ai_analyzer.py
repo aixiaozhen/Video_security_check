@@ -55,7 +55,7 @@ class ZhipuAnalyzer(AIAnalyzer):
                     img_base = base64.b64encode(image_file.read()).decode('utf-8')
 
                 response = self.client.chat.completions.create(
-                    model="glm-4v-plus",
+                    model="glm-4v-flash",
                     messages=[{
                         "role": "user",
                         "content": [
