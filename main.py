@@ -19,9 +19,15 @@ from config_manager import ConfigManager
 from tkinter import filedialog
 from ai_analyzer import AIManager  # 从 ai_analyzer 导入 AIManager
 import shutil
+import webbrowser
+from packaging import version
+import sys
 
 
 class VideoAnalyzer(tk.Tk):
+    VERSION = "1.0.0"  # 当前版本号
+    UPDATE_URL = "https://api.github.com/repos/your_username/your_repo/releases/latest"  # 替换为你的仓库地址
+    
     def __init__(self):
         super().__init__()
 
@@ -62,11 +68,17 @@ class VideoAnalyzer(tk.Tk):
         self.current_model = tk.StringVar(value=self.config_manager.config.get('current_model', ''))
         self.sensitivity_value = tk.StringVar(value=str(self.config_manager.config.get('sensitivity', 0.2)))
 
+        # 设置 ffmpeg 路径
+        self.ffmpeg_path = self._get_ffmpeg_path()
+
         # 创建所有 UI 控件
         self._create_ui()
         
         # 加载保存的配置
         self._load_saved_config()
+
+        # 检查更新
+        self.check_for_updates()
 
     def _create_ui(self):
         # 创建主容器来组织所有内容 - 使用无边框样式
@@ -376,6 +388,16 @@ class VideoAnalyzer(tk.Tk):
         # 最后再设置输出目录状态
         self._toggle_output_dir()
 
+        # 修改帮助菜单
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
+        
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="帮助", menu=help_menu)
+        help_menu.add_command(label="检查更新", command=self.check_for_updates)
+        help_menu.add_separator()  # 添加分隔线
+        help_menu.add_command(label="关于", command=self._show_about)
+
     def _load_saved_config(self):
         """加载保存的配置"""
         config = self.config_manager.config
@@ -527,6 +549,20 @@ class VideoAnalyzer(tk.Tk):
             print(f"Invalid value: {value}")
 
     def process_video(self, video_path):
+        # 检查 ffmpeg 是否可用
+        if not self.ffmpeg_path:
+            return
+        
+        # 修改 ffmpeg 命令调用
+        command = [
+            self.ffmpeg_path,
+            '-i', video_path,
+            '-vf', f"select='gt(scene,{self.sensitivity_value.get()})'",
+            '-vsync', 'vfr',
+            '-q:v', '2',  # 添加JPEG质量设置
+            os.path.join(os.path.dirname(video_path), 'temp_%04d.jpg')
+        ]
+
         self.status_label.config(text="正在处理视频，请稍候...")
         self.progress_label.config(text="准备处理...")
         self.progress_bar.start(10)  # 启动进度条动画
@@ -1125,6 +1161,147 @@ class VideoAnalyzer(tk.Tk):
             # import subprocess
             # subprocess.run(['open', self.current_output_dir])  # macOS
             # subprocess.run(['xdg-open', self.current_output_dir])  # Linux
+
+    def _get_ffmpeg_path(self):
+        """获取 ffmpeg 可执行文件路径"""
+        try:
+            # 如果是打包后的程序，使用不同的路径获取方式
+            if getattr(sys, 'frozen', False):
+                app_dir = sys._MEIPASS
+            else:
+                app_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            bundled_ffmpeg = os.path.join(app_dir, 'bin', 'ffmpeg.exe')
+            
+            if os.path.exists(bundled_ffmpeg):
+                return bundled_ffmpeg
+            
+            # 如果找不到打包的 ffmpeg，尝试系统路径
+            if os.name == 'nt':
+                result = subprocess.run(['where', 'ffmpeg'], 
+                                     capture_output=True, 
+                                     text=True)
+                if result.returncode == 0:
+                    return 'ffmpeg'
+            else:
+                result = subprocess.run(['which', 'ffmpeg'], 
+                                     capture_output=True, 
+                                     text=True)
+                if result.returncode == 0:
+                    return 'ffmpeg'
+                
+        except Exception as e:
+            print(f"Error finding ffmpeg: {e}")
+        
+        # 如果都找不到，显示错误消息
+        messagebox.showerror(
+            "错误",
+            "找不到 ffmpeg。请确保程序完整性或联系技术支持。"
+        )
+        return None
+
+    def check_for_updates(self):
+        """检查软件更新"""
+        try:
+            response = requests.get(self.UPDATE_URL, timeout=5)
+            if response.status_code == 200:
+                latest_release = response.json()
+                latest_version = latest_release['tag_name'].lstrip('v')
+                
+                if version.parse(latest_version) > version.parse(self.VERSION):
+                    # 有新版本可用
+                    result = messagebox.askyesno(
+                        "发现新版本",
+                        f"当前版本：{self.VERSION}\n"
+                        f"最新版本：{latest_version}\n\n"
+                        f"更新内容：\n{latest_release['body']}\n\n"
+                        "是否前往下载页面？"
+                    )
+                    
+                    if result:
+                        webbrowser.open(latest_release['html_url'])
+                else:
+                    messagebox.showinfo(
+                        "检查更新",
+                        "当前已是最新版本。"
+                    )
+        except Exception as e:
+            messagebox.showerror(
+                "检查更新失败",
+                f"无法检查更新：{str(e)}\n"
+                "请检查网络连接后重试。"
+            )
+
+    def _show_about(self):
+        """显示关于对话框"""
+        about_window = tk.Toplevel(self)
+        about_window.title("关于")
+        about_window.geometry("400x300")
+        about_window.resizable(False, False)
+        
+        # 设置模态对话框
+        about_window.transient(self)
+        about_window.grab_set()
+        
+        # 创建内容框架
+        content_frame = ttk.Frame(about_window)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # 添加软件名称
+        title_label = ttk.Label(
+            content_frame,
+            text="视频安全检查工具",
+            font=('Arial', 16, 'bold')
+        )
+        title_label.pack(pady=(0, 10))
+        
+        # 添加版本信息
+        version_label = ttk.Label(
+            content_frame,
+            text=f"版本 {self.VERSION}",
+            font=('Arial', 10)
+        )
+        version_label.pack(pady=(0, 20))
+        
+        # 添加软件说明
+        description = """
+        本工具用于视频内容安全检查，支持：
+        • 自动场景检测
+        • AI 智能分析
+        • 风险报告生成
+        • 批量图片处理
+        """
+        desc_label = ttk.Label(
+            content_frame,
+            text=description,
+            justify=tk.LEFT,
+            wraplength=350
+        )
+        desc_label.pack(pady=(0, 20))
+        
+        # 添加版权信息
+        copyright_label = ttk.Label(
+            content_frame,
+            text="Copyright © 2024",
+            font=('Arial', 9)
+        )
+        copyright_label.pack(pady=(0, 10))
+        
+        # 添加确定按钮
+        ttk.Button(
+            content_frame,
+            text="确定",
+            command=about_window.destroy,
+            width=15
+        ).pack(pady=(10, 0))
+        
+        # 设置对话框位置为屏幕中心
+        about_window.update_idletasks()
+        width = about_window.winfo_width()
+        height = about_window.winfo_height()
+        x = (about_window.winfo_screenwidth() // 2) - (width // 2)
+        y = (about_window.winfo_screenheight() // 2) - (height // 2)
+        about_window.geometry(f'+{x}+{y}')
 
 
 if __name__ == '__main__':
