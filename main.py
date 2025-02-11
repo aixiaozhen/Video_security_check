@@ -647,7 +647,8 @@ class VideoAnalyzer(tk.Tk):
                 stderr=subprocess.PIPE,
                 universal_newlines=True,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                creationflags=0x08000000  # 添加这一行来隐藏窗口
             )
 
             # 读取输出并更新进度
