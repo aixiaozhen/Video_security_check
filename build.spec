@@ -2,9 +2,10 @@
 import os
 import sys
 from pathlib import Path
+from PyInstaller.building.build_main import Analysis, PYZ, EXE
 
-# 获取当前目录的绝对路径
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+# 使用 os.getcwd() 替代 os.path.dirname(__file__)
+BASE_DIR = os.path.abspath(os.getcwd())
 FFMPEG_PATH = os.path.join(BASE_DIR, 'bin', 'ffmpeg.exe')
 
 # 检查 ffmpeg.exe 是否存在
@@ -17,7 +18,7 @@ block_cipher = None
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=[BASE_DIR],
     binaries=[
         (FFMPEG_PATH, 'bin')  # 使用绝对路径
     ],
@@ -47,9 +48,9 @@ pyz = PYZ(
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
+    a.binaries,        # 添加二进制文件
+    a.zipfiles,        # 添加压缩文件
+    a.datas,           # 添加数据文件
     [],
     name='视频安全检查工具',
     debug=False,
@@ -63,5 +64,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon.ico' if os.path.exists('icon.ico') else None,
+    icon=os.path.join(BASE_DIR, 'icon.ico') if os.path.exists('icon.ico') else None,
 ) 
