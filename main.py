@@ -22,6 +22,7 @@ import shutil
 import webbrowser
 from packaging import version
 import sys
+import socket
 
 
 class VideoAnalyzer(tk.Tk):
@@ -29,12 +30,26 @@ class VideoAnalyzer(tk.Tk):
     UPDATE_URL = "https://api.github.com/repos/your_username/your_repo/releases/latest"  # 替换为你的仓库地址
     
     def __init__(self):
+        # 在创建窗口之前检查是否已经有实例在运行
+        try:
+            # 尝试绑定一个特定端口
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.bind(('localhost', 45678))  # 使用一个不常用的端口号
+        except socket.error:
+            messagebox.showerror("错误", "程序已经在运行！")
+            sys.exit(1)
+            
         super().__init__()
 
         # 设置窗口标题和尺寸
         self.title("视频安全检查工具")
         self.geometry("1024x700")
         self.resizable(False, False)
+        
+        # 设置窗口图标 - 使用绝对路径
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icon.ico')
+        if os.path.exists(icon_path):
+            self.iconbitmap(icon_path)
 
         # 创建和配置样式
         style = ttk.Style()
@@ -1302,6 +1317,12 @@ class VideoAnalyzer(tk.Tk):
         x = (about_window.winfo_screenwidth() // 2) - (width // 2)
         y = (about_window.winfo_screenheight() // 2) - (height // 2)
         about_window.geometry(f'+{x}+{y}')
+
+    def destroy(self):
+        # 关闭程序时释放socket
+        if hasattr(self, 'socket'):
+            self.socket.close()
+        super().destroy()
 
 
 if __name__ == '__main__':
