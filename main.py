@@ -1261,15 +1261,14 @@ class VideoAnalyzer(tk.Tk):
             text=f"版本 {self.VERSION}",
             font=('Arial', 10)
         )
-        version_label.pack(pady=(0, 20))
+        version_label.pack(pady=(0, 10))
         
         # 添加软件说明
         description = """
-        本工具用于视频内容安全检查，支持：
-        • 自动场景检测
-        • AI 智能分析
-        • 风险报告生成
-        • 批量图片处理
+        本工具用于辅助内容审核，对视频快速安全检查：
+        • 使用FFmpeg自动检测场景并生成截图
+        • 使用AI大模型对关键帧截图智能分析
+        • 生成并导出风险报告
         """
         desc_label = ttk.Label(
             content_frame,
@@ -1277,12 +1276,12 @@ class VideoAnalyzer(tk.Tk):
             justify=tk.LEFT,
             wraplength=350
         )
-        desc_label.pack(pady=(0, 20))
+        desc_label.pack(pady=(0, 10))
         
         # 添加版权信息
         copyright_label = ttk.Label(
             content_frame,
-            text="Copyright © 2024",
+            text="Copyright © Aixiaozhen 2025",
             font=('Arial', 9)
         )
         copyright_label.pack(pady=(0, 10))
