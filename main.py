@@ -27,7 +27,7 @@ import socket
 
 class VideoAnalyzer(tk.Tk):
     VERSION = "1.0.0"  # 当前版本号
-    UPDATE_URL = "https://api.github.com/repos/your_username/your_repo/releases/latest"  # 替换为你的仓库地址
+    UPDATE_URL = "https://api.github.com/repos/aixiaozhen/Video_security_check/releases/latest"  # 替换为你的仓库地址
     
     def __init__(self):
         # 在创建窗口之前检查是否已经有实例在运行
