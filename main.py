@@ -23,6 +23,7 @@ import webbrowser
 from packaging import version
 import sys
 import socket
+from img.logo import imgBase64
 
 
 class VideoAnalyzer(tk.Tk):
@@ -92,8 +93,14 @@ class VideoAnalyzer(tk.Tk):
         # 加载保存的配置
         self._load_saved_config()
 
-        # 检查更新
-        self.check_for_updates()
+        # 注释掉自动检查更新
+        # self.check_for_updates()
+
+        # 在创建窗口后添加以下代码
+        self.createTempLogo()
+        self.wm_iconbitmap("temp.ico")  # 设置窗口图标
+        if os.path.exists("temp.ico"):
+            os.remove("temp.ico")  # 删除临时图标文件
 
     def _create_ui(self):
         # 创建主容器来组织所有内容 - 使用无边框样式
@@ -110,7 +117,7 @@ class VideoAnalyzer(tk.Tk):
 
         # 创建第二个选项卡 - 设置
         settings_tab = ttk.Frame(notebook, style='Borderless.TFrame')
-        notebook.add(settings_tab, text='设置')
+        notebook.add(settings_tab, text='软件设置')
 
         # === 第一个选项卡的内容 ===
         # 文件选择区域
@@ -956,6 +963,12 @@ class VideoAnalyzer(tk.Tk):
         report_window.geometry("800x600")
         report_window.resizable(False, False)  # 禁止调整窗口大小
         
+        # 设置子窗口图标
+        self.createTempLogo()
+        report_window.iconbitmap("temp.ico")  # 设置窗口图标
+        if os.path.exists("temp.ico"):
+            os.remove("temp.ico")  # 删除临时图标文件
+
         # 创建报告内容
         report_frame = ttk.Frame(report_window)
         report_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -1219,7 +1232,19 @@ class VideoAnalyzer(tk.Tk):
     def check_for_updates(self):
         """检查软件更新"""
         try:
-            response = requests.get(self.UPDATE_URL, timeout=5)
+            # 添加超时和代理处理
+            proxies = {
+                'http': None,
+                'https': None
+            }
+            
+            response = requests.get(
+                self.UPDATE_URL, 
+                timeout=5,
+                proxies=proxies,  # 禁用代理
+                verify=False      # 禁用 SSL 验证
+            )
+            
             if response.status_code == 200:
                 latest_release = response.json()
                 latest_version = latest_release['tag_name'].lstrip('v')
@@ -1241,7 +1266,11 @@ class VideoAnalyzer(tk.Tk):
                         "检查更新",
                         "当前已是最新版本。"
                     )
+        except requests.exceptions.RequestException as e:
+            # 静默处理网络错误，不显示错误消息框
+            print(f"检查更新失败: {str(e)}")
         except Exception as e:
+            # 其他错误才显示错误消息框
             messagebox.showerror(
                 "检查更新失败",
                 f"无法检查更新：{str(e)}\n"
@@ -1254,6 +1283,12 @@ class VideoAnalyzer(tk.Tk):
         about_window.title("关于")
         about_window.geometry("400x300")
         about_window.resizable(False, False)
+        
+        # 设置子窗口图标
+        self.createTempLogo()
+        about_window.iconbitmap("temp.ico")  # 设置窗口图标
+        if os.path.exists("temp.ico"):
+            os.remove("temp.ico")  # 删除临时图标文件
         
         # 设置模态对话框
         about_window.transient(self)
@@ -1323,6 +1358,11 @@ class VideoAnalyzer(tk.Tk):
         if hasattr(self, 'socket'):
             self.socket.close()
         super().destroy()
+
+    def createTempLogo(self):
+        tmp = open("temp.ico", "wb+")  # 创建temp.ico临时文件
+        tmp.write(base64.b64decode(imgBase64))  # 写入img的base64
+        tmp.close()
 
 
 if __name__ == '__main__':

@@ -32,11 +32,12 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['numpy', 'pandas'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
+    optimize=2,
 )
 
 pyz = PYZ(
@@ -64,5 +65,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=os.path.join(BASE_DIR, 'icon.ico') if os.path.exists('icon.ico') else None,
+    icon='./img/logo.ico'  # 指定图标路径
 ) 
