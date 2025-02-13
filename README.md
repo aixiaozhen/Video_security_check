@@ -46,6 +46,20 @@
    - 下载 FFmpeg 可执行文件
    - 将 ffmpeg.exe 放置在 `bin` 目录下
 
+### 打包程序
+
+1. 安装 PyInstaller：
+   ```bash
+   pip install pyinstaller
+   ```
+
+2. 使用提供的配置文件打包：
+   ```bash
+   pyinstaller build.spec
+   ```
+
+打包完成后，可执行文件将生成在 `dist` 目录中。
+
 ## 使用说明
 
 ### Windows单文件exe版本使用方法

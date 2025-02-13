@@ -1,1 +1,31 @@
 bin/ffmpeg.exe
+
+# Build folders
+build/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temp files
+temp.ico
+*.log
+
+# Config files
+config.json
+
+# 保留 build.spec，但忽略其他 spec 文件
+*.spec
+!build.spec
