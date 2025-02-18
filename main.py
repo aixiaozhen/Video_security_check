@@ -27,7 +27,7 @@ from img.logo import imgBase64
 
 
 class VideoAnalyzer(tk.Tk):
-    VERSION = "1.0.0"  # 当前版本号
+    VERSION = "1.0.1"  # 当前版本号
     UPDATE_URL = "https://api.github.com/repos/aixiaozhen/Video_security_check/releases/latest"  # 替换为你的仓库地址
     
     def __init__(self):
@@ -572,16 +572,17 @@ class VideoAnalyzer(tk.Tk):
 
     def process_video(self, video_path):
         # 检查 ffmpeg 是否可用
-        if not self.ffmpeg_path:
+        ffmpeg_path = self._get_ffmpeg_path()
+        if not ffmpeg_path:
             return
         
-        # 修改 ffmpeg 命令调用
+        # 修改 ffmpeg 命令调用，使用完整路径
         command = [
-            self.ffmpeg_path,
+            ffmpeg_path,  # 使用完整路径
             '-i', video_path,
             '-vf', f"select='gt(scene,{self.sensitivity_value.get()})'",
             '-vsync', 'vfr',
-            '-q:v', '2',  # 添加JPEG质量设置
+            '-q:v', '2',
             os.path.join(os.path.dirname(video_path), 'temp_%04d.jpg')
         ]
 
@@ -619,6 +620,10 @@ class VideoAnalyzer(tk.Tk):
 
     def _process_video_thread(self, video_path):
         try:
+            ffmpeg_path = self._get_ffmpeg_path()
+            print(f"Using ffmpeg path: {ffmpeg_path}")  # 调试输出
+            print(f"ffmpeg exists: {os.path.exists(ffmpeg_path)}")  # 检查文件是否存在
+            
             # 获取视频文件名（不含扩展名）和时间戳
             video_name = os.path.splitext(os.path.basename(video_path))[0]
             timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -653,15 +658,21 @@ class VideoAnalyzer(tk.Tk):
             # 使用ffmpeg提取关键帧
             temp_pattern = os.path.join(frames_dir, 'temp_%04d.jpg').replace('\\', '/')
             
+            # 使用完整的 ffmpeg 路径
+            ffmpeg_path = self._get_ffmpeg_path()
+            
+            # 修改提取命令
             extract_command = [
-                'ffmpeg',
+                ffmpeg_path,  # 使用完整路径而不是 'ffmpeg'
                 '-i', video_path,
                 '-vf', f"select='gt(scene,{sensitivity})'",
                 '-vsync', 'vfr',
-                '-q:v', '2',  # 添加JPEG质量设置
+                '-q:v', '2',
                 temp_pattern
             ]
 
+            print(f"Running command: {' '.join(extract_command)}")  # 打印完整命令
+            
             # 执行提取命令
             process = subprocess.Popen(
                 extract_command,
@@ -670,7 +681,7 @@ class VideoAnalyzer(tk.Tk):
                 universal_newlines=True,
                 encoding='utf-8',
                 errors='replace',
-                creationflags=0x08000000  # 添加这一行来隐藏窗口
+                creationflags=0x08000000  # Windows下隐藏控制台窗口
             )
 
             # 读取输出并更新进度
@@ -1194,18 +1205,22 @@ class VideoAnalyzer(tk.Tk):
     def _get_ffmpeg_path(self):
         """获取 ffmpeg 可执行文件路径"""
         try:
-            # 如果是打包后的程序，使用不同的路径获取方式
+            # 如果是打包后的程序，优先使用打包的 ffmpeg
             if getattr(sys, 'frozen', False):
-                app_dir = sys._MEIPASS
+                if hasattr(sys, '_MEIPASS'):
+                    # PyInstaller 打包环境
+                    bundled_ffmpeg = os.path.join(sys._MEIPASS, 'bin', 'ffmpeg.exe')
+                else:
+                    # 其他打包环境
+                    bundled_ffmpeg = os.path.join(os.path.dirname(sys.executable), 'bin', 'ffmpeg.exe')
             else:
-                app_dir = os.path.dirname(os.path.abspath(__file__))
-            
-            bundled_ffmpeg = os.path.join(app_dir, 'bin', 'ffmpeg.exe')
+                # 开发环境
+                bundled_ffmpeg = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bin', 'ffmpeg.exe')
             
             if os.path.exists(bundled_ffmpeg):
                 return bundled_ffmpeg
             
-            # 如果找不到打包的 ffmpeg，尝试系统路径
+            # 如果找不到打包的 ffmpeg，尝试系统路径（这部分代码可以保留但不会被使用）
             if os.name == 'nt':
                 result = subprocess.run(['where', 'ffmpeg'], 
                                      capture_output=True, 
@@ -1222,12 +1237,12 @@ class VideoAnalyzer(tk.Tk):
         except Exception as e:
             print(f"Error finding ffmpeg: {e}")
         
-        # 如果都找不到，显示错误消息
+        # 如果找不到 ffmpeg，显示错误消息并退出程序
         messagebox.showerror(
             "错误",
-            "找不到 ffmpeg。请确保程序完整性或联系技术支持。"
+            "找不到 ffmpeg。程序无法继续运行，请确保程序完整性或联系技术支持。"
         )
-        return None
+        sys.exit(1)  # 直接退出程序
 
     def check_for_updates(self):
         """检查软件更新"""

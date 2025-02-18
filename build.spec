@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from PyInstaller.building.build_main import Analysis, PYZ, EXE
 
-# 使用 os.getcwd() 替代 os.path.dirname(__file__)
+# 使用绝对路径
 BASE_DIR = os.path.abspath(os.getcwd())
 FFMPEG_PATH = os.path.join(BASE_DIR, 'bin', 'ffmpeg.exe')
 
@@ -20,7 +20,7 @@ a = Analysis(
     ['main.py'],
     pathex=[BASE_DIR],
     binaries=[
-        (FFMPEG_PATH, 'bin')  # 使用绝对路径
+        (FFMPEG_PATH, 'bin')  # 确保 ffmpeg.exe 被打包到 bin 目录
     ],
     datas=[],
     hiddenimports=[
