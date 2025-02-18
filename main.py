@@ -93,14 +93,14 @@ class VideoAnalyzer(tk.Tk):
         # 加载保存的配置
         self._load_saved_config()
 
-        # 注释掉自动检查更新
-        # self.check_for_updates()
-
         # 在创建窗口后添加以下代码
         self.createTempLogo()
         self.wm_iconbitmap("temp.ico")  # 设置窗口图标
         if os.path.exists("temp.ico"):
             os.remove("temp.ico")  # 删除临时图标文件
+
+        # 添加延迟检查更新
+        self.after(3000, lambda: self.check_for_updates(silent=True))
 
     def _create_ui(self):
         # 创建主容器来组织所有内容 - 使用无边框样式
@@ -280,6 +280,43 @@ class VideoAnalyzer(tk.Tk):
         style.configure("Risk.TFrame", background="red")
         style.configure("Safe.TFrame", background="green")
 
+        # === 第二个选项卡的内容 ===
+        # 添加版本信息和按钮组区域
+        version_frame = ttk.Frame(settings_tab)
+        version_frame.pack(padx=10, pady=10, fill=tk.X)
+
+        # 左侧版本号
+        version_label = ttk.Label(
+            version_frame,
+            text=f"当前版本：{self.VERSION}",
+            font=('Arial', 10)
+        )
+        version_label.pack(side=tk.LEFT)
+
+        # 右侧按钮组
+        button_group = ttk.Frame(version_frame)
+        button_group.pack(side=tk.RIGHT)
+
+        # 添加按钮到按钮组
+        self.config_button = ttk.Button(
+            button_group,
+            text="打开配置目录",
+            command=self._open_config_dir
+        )
+        self.config_button.pack(side=tk.LEFT, padx=(0, 5))
+
+        ttk.Button(
+            button_group,
+            text="检查更新",
+            command=self.check_for_updates
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        ttk.Button(
+            button_group,
+            text="关于",
+            command=self._show_about
+        ).pack(side=tk.LEFT)
+
         # 在设置区域添加输出目录设置
         self.output_frame = ttk.LabelFrame(settings_tab, text="输出设置", style='Borderless.TLabelframe')
         self.output_frame.pack(padx=10, pady=10, fill=tk.X)
@@ -315,7 +352,6 @@ class VideoAnalyzer(tk.Tk):
         if saved_dir:
             self.output_dir_entry.insert(0, saved_dir)
 
-        # === 第二个选项卡的内容 ===
         # AI设置区域
         self.ai_settings_frame = ttk.LabelFrame(settings_tab, text="AI 分析设置", style='Borderless.TLabelframe')
         self.ai_settings_frame.pack(padx=10, pady=10, fill=tk.X)
@@ -369,18 +405,6 @@ class VideoAnalyzer(tk.Tk):
         self.api_key_entry.bind('<KeyRelease>', lambda e: self._save_config())
         self.api_key_entry.bind('<FocusOut>', lambda e: self._save_config())
 
-        # 创建按钮容器框架
-        button_frame = ttk.Frame(self.ai_settings_frame)
-        button_frame.pack(padx=5, pady=5, fill=tk.X)
-
-        # 只保留配置文件目录按钮
-        self.config_button = ttk.Button(
-            button_frame,
-            text="打开配置目录",
-            command=self._open_config_dir
-        )
-        self.config_button.pack(side=tk.LEFT, padx=5)
-
         # 场景检测设置区域
         self.detection_frame = ttk.LabelFrame(settings_tab, text="场景检测设置", style='Borderless.TLabelframe')
         self.detection_frame.pack(padx=10, pady=10, fill=tk.X)
@@ -409,16 +433,6 @@ class VideoAnalyzer(tk.Tk):
 
         # 最后再设置输出目录状态
         self._toggle_output_dir()
-
-        # 修改帮助菜单
-        menubar = tk.Menu(self)
-        self.config(menu=menubar)
-        
-        help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="帮助", menu=help_menu)
-        help_menu.add_command(label="检查更新", command=self.check_for_updates)
-        help_menu.add_separator()  # 添加分隔线
-        help_menu.add_command(label="关于", command=self._show_about)
 
     def _load_saved_config(self):
         """加载保存的配置"""
@@ -1244,8 +1258,12 @@ class VideoAnalyzer(tk.Tk):
         )
         sys.exit(1)  # 直接退出程序
 
-    def check_for_updates(self):
-        """检查软件更新"""
+    def check_for_updates(self, silent=False):
+        """检查软件更新
+        
+        Args:
+            silent (bool): 是否静默检查。如果为True，则只在有更新时显示提示。
+        """
         try:
             # 添加超时和代理处理
             proxies = {
@@ -1276,21 +1294,29 @@ class VideoAnalyzer(tk.Tk):
                     
                     if result:
                         webbrowser.open(latest_release['html_url'])
-                else:
+                elif not silent:  # 只在非静默模式下显示"已是最新版本"的消息
                     messagebox.showinfo(
                         "检查更新",
                         "当前已是最新版本。"
                     )
         except requests.exceptions.RequestException as e:
-            # 静默处理网络错误，不显示错误消息框
+            # 静默处理网络错误
             print(f"检查更新失败: {str(e)}")
+            if not silent:  # 只在非静默模式下显示错误消息框
+                messagebox.showerror(
+                    "检查更新失败",
+                    f"无法检查更新：{str(e)}\n"
+                    "请检查网络连接后重试。"
+                )
         except Exception as e:
-            # 其他错误才显示错误消息框
-            messagebox.showerror(
-                "检查更新失败",
-                f"无法检查更新：{str(e)}\n"
-                "请检查网络连接后重试。"
-            )
+            # 其他错误也只在非静默模式下显示
+            print(f"检查更新时发生错误: {str(e)}")
+            if not silent:
+                messagebox.showerror(
+                    "检查更新失败",
+                    f"无法检查更新：{str(e)}\n"
+                    "请检查网络连接后重试。"
+                )
 
     def _show_about(self):
         """显示关于对话框"""
